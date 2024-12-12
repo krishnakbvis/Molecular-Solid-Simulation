@@ -127,8 +127,8 @@ int main() {
     const double timeStep = 1e-4;
     const int runTime = 10;
     int samplerate = 100;
-    const int N = 1000;
-    const double boxwidth = 33.0;
+    const int N = 2000;
+    const double boxwidth = 44.0;
 
     const int iterations = runTime / timeStep;
 
@@ -181,7 +181,7 @@ int main() {
             dev_xVel, dev_yVel, N, timeStep, dev_radii, boxwidth);
 
         cudaDeviceSynchronize();
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 3; i++) {
             computeCollisions <<<blocksPerGrid, threadsPerBlock >>> (dev_xPos, dev_yPos, N, dev_radii);
             cudaDeviceSynchronize();
         }
