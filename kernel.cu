@@ -176,17 +176,16 @@ int main() {
 
     // Main loop
     for (int count = 0; count < iterations; count++) {
-        computeCollisions << <blocksPerGrid, threadsPerBlock >> > (dev_xPos, dev_yPos, N, dev_radii);
-        cudaDeviceSynchronize();
-
 
         integratePositions << <blocksPerGrid, threadsPerBlock >> > (count, dev_xmat, dev_ymat, dev_xPos, dev_yPos,
             dev_xVel, dev_yVel, N, timeStep, dev_radii, boxwidth);
 
         cudaDeviceSynchronize();
- 
-        computeCollisions << <blocksPerGrid, threadsPerBlock >> > (dev_xPos, dev_yPos, N, dev_radii);       
-        integrateVelocities << <blocksPerGrid.x, threadsPerBlock.x >> > (dev_xVel, dev_yVel, N, timeStep);
+        for (int i = 0; i < 5; i++) {
+            computeCollisions <<<blocksPerGrid, threadsPerBlock >>> (dev_xPos, dev_yPos, N, dev_radii);
+            cudaDeviceSynchronize();
+        }
+        integrateVelocities <<<blocksPerGrid.x, threadsPerBlock.x>>> (dev_xVel, dev_yVel, N, timeStep);
         cudaDeviceSynchronize();
     }
 
