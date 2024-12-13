@@ -8,7 +8,7 @@
 
 
 // Kernel to compute force matrix
-__global__ void computeCollisions(double* xPos, double* yPos, int N, double* radii) {
+__global__ void computeCollisions(float* xPos, float* yPos, int N, float* radii) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -26,39 +26,38 @@ __global__ void computeCollisions(double* xPos, double* yPos, int N, double* rad
         float dist2 = dx * dx + dy * dy;
 
         // Define constants
-        const float response_coef = 0.5;
-        const float eps = 0.0000000001;  
+        const float response_coef = 0.5f;
+        const float eps = 0.0000000001f;  
+
+        float sep = sqrtf(dist2);
+
+        // Calculate overlap correction
+        float overlap = -response_coef * 0.5 * sep; // Total radius is 2.0
+        float colVecX = (dx / sep) * overlap;
+        float colVecY = (dy / sep) * overlap;
 
         // Check for overlap and process if within interaction range
         if (dist2 < 0.7f && dist2 > eps) { // Assuming radius is 1.0 for simplicity
-            float sep = sqrtf(dist2);
-
-            // Calculate overlap correction
-            float overlap = -response_coef * 0.5 * sep; // Total radius is 2.0
-            float colVecX = (dx / sep) * overlap;
-            float colVecY = (dy / sep) * overlap;
-
             // Apply corrections
             xPos[i] += colVecX;
             yPos[i] += colVecY;
             xPos[j] += -colVecX;
             yPos[j] += -colVecY;
-
         }
     }
 }
 
 
 // Verlet integration kernel
-__global__ void integratePositions(int count, double* dev_xPosMatrix, double* dev_yPosMatrix, double* xPos, double* yPos,
-    double* xVel, double* yVel, int N, double timeStep, double* radii, double bw) {
+__global__ void integratePositions(int count, float* dev_xPosMatrix, float* dev_yPosMatrix, float* xPos, float* yPos,
+    float* xVel, float* yVel, int N, float timeStep, float* radii, float bw) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int sample = 100;
-    double margin = 0.5;
-    double x_min = margin;
-    double x_max = bw - margin;
-    double y_min = margin;
-    double y_max = bw - margin;
+    float margin = 0.5;
+    float x_min = margin;
+    float x_max = bw - margin;
+    float y_min = margin;
+    float y_max = bw - margin;
 
     if (i < N) {
         if (count % sample == 0) {
@@ -68,7 +67,7 @@ __global__ void integratePositions(int count, double* dev_xPosMatrix, double* de
         }
 
         xPos[i] += xVel[i] * timeStep;
-        yPos[i] += yVel[i] * timeStep + 0.5 * -0.05 * timeStep * timeStep;
+        yPos[i] += yVel[i] * timeStep - 0.5 * 3 * timeStep * timeStep;
 
         if (xPos[i] > x_max) {
             xPos[i] = x_max;
@@ -90,15 +89,15 @@ __global__ void integratePositions(int count, double* dev_xPosMatrix, double* de
 }
 
 // Verlet velocity integration kernel
-__global__ void integrateVelocities(double* xVel, double* yVel, int N, double timeStep) {
+__global__ void integrateVelocities(float* xVel, float* yVel, int N, float timeStep) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < N) {
-        yVel[i] += -0.05 * timeStep;
+        yVel[i] += -3*timeStep;
     }
 }
 
 // Function to write a matrix to a CSV file
-void writeMatrixToFile(double* matrix, int rows, int cols, const char* filename) {
+void writeMatrixToFile(float* matrix, int rows, int cols, const char* filename) {
     FILE* file = fopen(filename, "w");
     if (file == NULL) {
         fprintf(stderr, "Error opening file %s for writing.\n", filename);
@@ -114,7 +113,7 @@ void writeMatrixToFile(double* matrix, int rows, int cols, const char* filename)
     fclose(file);
 }
 
-void printMatrix(double* matrix, int rows, int cols) {
+void printMatrix(float* matrix, int rows, int cols) {
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             printf("%f ", matrix[i * cols + j]);
@@ -124,76 +123,77 @@ void printMatrix(double* matrix, int rows, int cols) {
 }
 
 int main() {
-    const double timeStep = 1e-4;
+    const float timeStep = 1e-4;
     const int runTime = 10;
     int samplerate = 100;
-    const int N = 2000;
-    const double boxwidth = 44.0;
+    const int N = 3000;
+    const float boxwidth = 55.0;
 
     const int iterations = runTime / timeStep;
 
     // Allocate memory
-    double* xPos = (double*)malloc(N * sizeof(double));
-    double* yPos = (double*)malloc(N * sizeof(double));
-    double* xVel = (double*)malloc(N * sizeof(double));
-    double* yVel = (double*)malloc(N * sizeof(double));
-    double* radii = (double*)malloc(N * sizeof(double));
-    double* xPositionMatrix = (double*)malloc((iterations / samplerate) * N * sizeof(double));
-    double* yPositionMatrix = (double*)malloc((iterations / samplerate) * N * sizeof(double));
+    float* xPos = (float*)malloc(N * sizeof(float));
+    float* yPos = (float*)malloc(N * sizeof(float));
+    float* xVel = (float*)malloc(N * sizeof(float));
+    float* yVel = (float*)malloc(N * sizeof(float));
+    float* radii = (float*)malloc(N * sizeof(float));
+    float* xPositionMatrix = (float*)malloc((iterations / samplerate) * N * sizeof(float));
+    float* yPositionMatrix = (float*)malloc((iterations / samplerate) * N * sizeof(float));
 
     // Initialize positions, velocities, etc.
     srand(time(NULL));
     for (int i = 0; i < N; i++) {
-        xPos[i] = (double)rand() / (double)(RAND_MAX / (boxwidth - 1)); 
-        yPos[i] = (double)rand() / (double)(RAND_MAX / (boxwidth - 1));
-        xVel[i] = ((double)rand() / (double)(RAND_MAX / 2)) - (2 / 2);
-        yVel[i] = ((double)rand() / (double)(RAND_MAX / 2)) - (2 / 2);
+        xPos[i] = (float)rand() / (float)(RAND_MAX / (boxwidth - 1)); 
+        yPos[i] = (float)rand() / (float)(RAND_MAX / (boxwidth - 1));
+        xVel[i] = ((float)rand() / (float)(RAND_MAX / 5)) - (5 / 2);
+        yVel[i] = ((float)rand() / (float)(RAND_MAX / 5)) - (5 / 2);
         radii[i] = 0.15;
     }
 
     // Allocate device memory
-    double* dev_xPos, * dev_yPos, * dev_xVel, * dev_yVel, * dev_radii;
-    double* dev_xmat, * dev_ymat;
+    float* dev_xPos, * dev_yPos, * dev_xVel, * dev_yVel, * dev_radii;
+    float* dev_xmat, * dev_ymat;
 
-    cudaMalloc((void**)&dev_xPos, N * sizeof(double));
-    cudaMalloc((void**)&dev_yPos, N * sizeof(double));
-    cudaMalloc((void**)&dev_xVel, N * sizeof(double));
-    cudaMalloc((void**)&dev_yVel, N * sizeof(double));
-    cudaMalloc((void**)&dev_radii, N * sizeof(double));
-    cudaMalloc((void**)&dev_xmat, (iterations / samplerate) * N * sizeof(double));
-    cudaMalloc((void**)&dev_ymat, (iterations / samplerate) * N * sizeof(double));
+    cudaMalloc((void**)&dev_xPos, N * sizeof(float));
+    cudaMalloc((void**)&dev_yPos, N * sizeof(float));
+    cudaMalloc((void**)&dev_xVel, N * sizeof(float));
+    cudaMalloc((void**)&dev_yVel, N * sizeof(float));
+    cudaMalloc((void**)&dev_radii, N * sizeof(float));
+    cudaMalloc((void**)&dev_xmat, (iterations / samplerate) * N * sizeof(float));
+    cudaMalloc((void**)&dev_ymat, (iterations / samplerate) * N * sizeof(float));
 
     // Copy data to device
-    cudaMemcpy(dev_xPos, xPos, N * sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_yPos, yPos, N * sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_xVel, xVel, N * sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_yVel, yVel, N * sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_radii, radii, N * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_xPos, xPos, N * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_yPos, yPos, N * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_xVel, xVel, N * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_yVel, yVel, N * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_radii, radii, N * sizeof(float), cudaMemcpyHostToDevice);
 
     dim3 threadsPerBlock(32, 32);
-    dim3 blocksPerGrid((N + threadsPerBlock.x - 1) / threadsPerBlock.x,
-        (N + threadsPerBlock.y - 1) / threadsPerBlock.y);
+    dim3 numBlocks((N + 15) / 16, (N + 15) / 16); // Ceil(N / 16) in both dimensions
+
+    int threadsPerBlock2 = 512;
+    int numBlocks2 = (N + threadsPerBlock2 - 1) / threadsPerBlock2; // Round up
+
+
 
     // Main loop
     for (int count = 0; count < iterations; count++) {
 
-        integratePositions << <blocksPerGrid, threadsPerBlock >> > (count, dev_xmat, dev_ymat, dev_xPos, dev_yPos,
+        integratePositions << <numBlocks2, threadsPerBlock2>> > (count, dev_xmat, dev_ymat, dev_xPos, dev_yPos,
             dev_xVel, dev_yVel, N, timeStep, dev_radii, boxwidth);
 
         cudaDeviceSynchronize();
-        for (int i = 0; i < 3; i++) {
-            computeCollisions <<<blocksPerGrid, threadsPerBlock >>> (dev_xPos, dev_yPos, N, dev_radii);
-            cudaDeviceSynchronize();
-        }
-        integrateVelocities <<<blocksPerGrid.x, threadsPerBlock.x>>> (dev_xVel, dev_yVel, N, timeStep);
+        computeCollisions << <numBlocks, threadsPerBlock>> > (dev_xPos, dev_yPos, N, dev_radii);
+        integrateVelocities <<<numBlocks2, threadsPerBlock2>>> (dev_xVel, dev_yVel, N, timeStep);
         cudaDeviceSynchronize();
     }
 
   
 
     // Copy results back to host
-    cudaMemcpy(xPositionMatrix, dev_xmat, (iterations / samplerate) * N * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(yPositionMatrix, dev_ymat, (iterations / samplerate) * N * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(xPositionMatrix, dev_xmat, (iterations / samplerate) * N * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(yPositionMatrix, dev_ymat, (iterations / samplerate) * N * sizeof(float), cudaMemcpyDeviceToHost);
 
     writeMatrixToFile(xPositionMatrix, iterations / samplerate, N, "xPositionMatrix.csv");
     writeMatrixToFile(yPositionMatrix, iterations / samplerate, N, "yPositionMatrix.csv");
